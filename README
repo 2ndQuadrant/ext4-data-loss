@@ -1,0 +1,45 @@
+1. (optional) Apply the xlog-flush.patch, adding pg_current_xlog_flush_location
+   function, returning the current WAL flush location.
+
+2. Make sure you have log_checkpoints=on - this is important for timing the
+   power failure right after checkpoint completes.
+
+3. Create a database for the test script, create the tables
+
+    $ createdb pgbench
+    $ psql pgbench < create.sql
+
+   The database name is expected to be 'pgbench' - in case you use another name
+   you'll have to modify the scripts.
+
+4. Run the python scripts from another machine (so that the output does not
+   disappear when the power is interrupted). The scripts contain hard-coded IP
+   addresses etc. so fix it first if needed.
+
+    $ python insert.py | sort -n | awk '{print $2}'
+    $ python update.py | sort -n | awk '{print $2}'
+    $ python xlog-watch.py
+
+   If you've applied the xlog-flush.patch, you may run
+
+    $ python xlog-watch-flush.py
+
+   instead.
+
+4. Watch the log, wait for several checkpoints to happen (so that the WAL
+   segments are being recycled), and then cut the power immediately after one
+   of the 'checkpoint completed' messages.
+
+6. If the scripts get stuck due to TCP waits, try using tcpkill (from dsniff)
+
+    $ sudo tcpkill -i eth0 host 192.168.1.37
+
+5. Restart the database, connect and compare the last inserted ID for each
+   client to the output of the python scripts (which simply insert sequence of
+   incrementing values):
+
+   select max(val::int) from test_insert group by id order by id;
+   select max(val::int) from test_update group by id order by id limit 32;
+
+   The values may not be exactly the same, as there might be 1 transaction in
+   flight (waiting for COMMIT from confirmation) per client.

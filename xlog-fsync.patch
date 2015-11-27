@@ -1,0 +1,13 @@
+diff --git a/src/backend/access/transam/xlog.c b/src/backend/access/transam/xlog.c
+index f17f834..b47c852 100644
+--- a/src/backend/access/transam/xlog.c
++++ b/src/backend/access/transam/xlog.c
+@@ -3282,6 +3282,8 @@ InstallXLogFileSegment(XLogSegNo *segno, char *tmppath,
+ 	}
+ #endif
+ 
++	fsync_fname("pg_xlog", true);
++
+ 	if (use_lock)
+ 		LWLockRelease(ControlFileLock);
+ 

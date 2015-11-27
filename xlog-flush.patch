@@ -1,0 +1,102 @@
+diff --git a/src/backend/access/transam/xlog.c b/src/backend/access/transam/xlog.c
+index f17f834..dec7721 100644
+--- a/src/backend/access/transam/xlog.c
++++ b/src/backend/access/transam/xlog.c
+@@ -10626,6 +10626,19 @@ GetXLogWriteRecPtr(void)
+ }
+ 
+ /*
++ * Get latest WAL flush pointer
++ */
++XLogRecPtr
++GetXLogFlushRecPtr(void)
++{
++	SpinLockAcquire(&XLogCtl->info_lck);
++	LogwrtResult = XLogCtl->LogwrtResult;
++	SpinLockRelease(&XLogCtl->info_lck);
++
++	return LogwrtResult.Flush;
++}
++
++/*
+  * Returns the redo pointer of the last checkpoint or restartpoint. This is
+  * the oldest point in WAL that we still need, if we have to restart recovery.
+  */
+diff --git a/src/backend/access/transam/xlogfuncs.c b/src/backend/access/transam/xlogfuncs.c
+index 329bb8c..35c581d 100644
+--- a/src/backend/access/transam/xlogfuncs.c
++++ b/src/backend/access/transam/xlogfuncs.c
+@@ -195,7 +195,7 @@ pg_current_xlog_location(PG_FUNCTION_ARGS)
+ }
+ 
+ /*
+- * Report the current WAL insert location (same format as pg_start_backup etc)
++ * Report the current WAL flush location (same format as pg_start_backup etc)
+  *
+  * This function is mostly for debugging purposes.
+  */
+@@ -216,6 +216,27 @@ pg_current_xlog_insert_location(PG_FUNCTION_ARGS)
+ }
+ 
+ /*
++ * Report the current WAL insert location (same format as pg_start_backup etc)
++ *
++ * This function is mostly for debugging purposes.
++ */
++Datum
++pg_current_xlog_flush_location(PG_FUNCTION_ARGS)
++{
++	XLogRecPtr	current_recptr;
++
++	if (RecoveryInProgress())
++		ereport(ERROR,
++				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
++				 errmsg("recovery is in progress"),
++				 errhint("WAL control functions cannot be executed during recovery.")));
++
++	current_recptr = GetXLogFlushRecPtr();
++
++	PG_RETURN_LSN(current_recptr);
++}
++
++/*
+  * Report the last WAL receive location (same format as pg_start_backup etc)
+  *
+  * This is useful for determining how much of WAL is guaranteed to be received
+diff --git a/src/include/access/xlog.h b/src/include/access/xlog.h
+index 790ca66..985291d 100644
+--- a/src/include/access/xlog.h
++++ b/src/include/access/xlog.h
+@@ -235,6 +235,7 @@ extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
+ extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID *replayTLI);
+ extern XLogRecPtr GetXLogInsertRecPtr(void);
+ extern XLogRecPtr GetXLogWriteRecPtr(void);
++extern XLogRecPtr GetXLogFlushRecPtr(void);
+ extern bool RecoveryIsPaused(void);
+ extern void SetRecoveryPause(bool recoveryPause);
+ extern TimestampTz GetLatestXTime(void);
+diff --git a/src/include/access/xlog_fn.h b/src/include/access/xlog_fn.h
+index 3ebe966..f4575d7 100644
+--- a/src/include/access/xlog_fn.h
++++ b/src/include/access/xlog_fn.h
+@@ -19,6 +19,7 @@ extern Datum pg_switch_xlog(PG_FUNCTION_ARGS);
+ extern Datum pg_create_restore_point(PG_FUNCTION_ARGS);
+ extern Datum pg_current_xlog_location(PG_FUNCTION_ARGS);
+ extern Datum pg_current_xlog_insert_location(PG_FUNCTION_ARGS);
++extern Datum pg_current_xlog_flush_location(PG_FUNCTION_ARGS);
+ extern Datum pg_last_xlog_receive_location(PG_FUNCTION_ARGS);
+ extern Datum pg_last_xlog_replay_location(PG_FUNCTION_ARGS);
+ extern Datum pg_last_xact_replay_timestamp(PG_FUNCTION_ARGS);
+diff --git a/src/include/catalog/pg_proc.h b/src/include/catalog/pg_proc.h
+index d8640db..ca8fcd4 100644
+--- a/src/include/catalog/pg_proc.h
++++ b/src/include/catalog/pg_proc.h
+@@ -3154,6 +3154,8 @@ DATA(insert OID = 2849 ( pg_current_xlog_location	PGNSP PGUID 12 1 0 0 0 f f f f
+ DESCR("current xlog write location");
+ DATA(insert OID = 2852 ( pg_current_xlog_insert_location	PGNSP PGUID 12 1 0 0 0 f f f f t f v s 0 0 3220 "" _null_ _null_ _null_ _null_ _null_ pg_current_xlog_insert_location _null_ _null_ _null_ ));
+ DESCR("current xlog insert location");
++DATA(insert OID = 3330 ( pg_current_xlog_flush_location	PGNSP PGUID 12 1 0 0 0 f f f f t f v s 0 0 3220 "" _null_ _null_ _null_ _null_ _null_ pg_current_xlog_flush_location _null_ _null_ _null_ ));
++DESCR("current xlog flush location");
+ DATA(insert OID = 2850 ( pg_xlogfile_name_offset	PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 2249 "3220" "{3220,25,23}" "{i,o,o}" "{wal_location,file_name,file_offset}" _null_ _null_ pg_xlogfile_name_offset _null_ _null_ _null_ ));
+ DESCR("xlog filename and byte offset, given an xlog location");
+ DATA(insert OID = 2851 ( pg_xlogfile_name			PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 25 "3220" _null_ _null_ _null_ _null_ _null_ pg_xlogfile_name _null_ _null_ _null_ ));
